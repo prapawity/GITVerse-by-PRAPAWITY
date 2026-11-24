@@ -7,6 +7,7 @@ pub mod hosting;
 pub mod migrate;
 pub mod releases;
 pub mod scan;
+pub mod scheduler;
 pub mod secrets;
 pub mod state;
 pub mod terminal;

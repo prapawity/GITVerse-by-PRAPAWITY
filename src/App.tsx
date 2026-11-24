@@ -36,6 +36,7 @@ import { BusyOverlay, Toasts } from './components/Feedback';
 import { ConflictPanel, ConflictRow } from './components/ConflictPanel';
 import { MergeTool } from './components/MergeTool';
 import { SettingsPage, type Section } from './components/Settings';
+import { ScheduleHost } from './components/ScheduleHost';
 import { AiPanel } from './components/AiPanel';
 import { SHOW_TERMINAL, TerminalPanel } from './components/TerminalPanel';
 import { useSettings } from './store/settingsStore';
@@ -191,6 +192,7 @@ export default function App() {
     return () => window.removeEventListener(SHOW_TERMINAL, show);
   }, []);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tabsRestored, setTabsRestored] = useState(false);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [workspaceInspectionOpen, setWorkspaceInspectionOpen] = useState(false);
   // Esc closes the Recovery / Workspace side panel, unless a dialog or menu handled it first
@@ -304,7 +306,10 @@ export default function App() {
 
   // reopen last session's tabs, then keep the saved list in sync (via subscribe, so the first render can't overwrite it)
   useEffect(() => {
-    if (restored) return;
+    if (restored) {
+      setTabsRestored(true);
+      return;
+    }
     restored = true;
     try {
       const raw = storage.getItem('gitverse.tabs');
@@ -328,6 +333,7 @@ export default function App() {
         /* ignore */
       }
     });
+    setTabsRestored(true);
   }, []);
 
   // background auto-fetch
@@ -1301,6 +1307,7 @@ export default function App() {
           </div>
         </div>
       )}
+      {tabsRestored && <ScheduleHost />}
       {/* repo tabs */}
       {!settingsOpen && (
         <nav

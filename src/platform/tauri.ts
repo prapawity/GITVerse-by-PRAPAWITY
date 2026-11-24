@@ -97,6 +97,22 @@ export async function createTauriApi(): Promise<PlatformApi> {
       };
     },
     setActiveIdentity: (identity) => call('set_identity', { identity }),
+    scheduler: {
+      init: (repos) => call('scheduler_init', { repos }),
+      repos: (repos) => call('scheduler_repos', { repos }),
+      list: () => call('scheduler_list'),
+      retry: () => call('scheduler_retry'),
+      recover: () => call('scheduler_recover'),
+      add: (input) => call('scheduler_add', { input }),
+      update: (input) => call('scheduler_update', { input }),
+      enable: (id, enabled) => call('scheduler_enable', { id, enabled }),
+      remove: (id) => call('scheduler_remove', { id }),
+      run: (id) => call('scheduler_run', { id }),
+      retryFailed: (id, previousRunId) => call('scheduler_retry_failed', { id, previousRunId }),
+      runMissed: (ids) => call('scheduler_run_missed', { ids }),
+      skipMissed: (ids) => call('scheduler_skip_missed', { ids }),
+      onChanged: (cb) => subscribe('scheduler:changed', cb),
+    },
     updates: {
       environment: () => call('updates_environment'),
       startup: () => call('updates_startup'),
