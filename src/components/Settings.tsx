@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   CheckCircle2,
+  CalendarClock,
   GitMerge,
   Info,
   KeyRound,
@@ -33,6 +34,7 @@ import { ExternalToolsSettings } from './ExternalToolsSettings';
 import { ProfileSettings } from './ProfileSettings';
 import { ApplicationAbout } from './ApplicationAbout';
 import { desktopApi, platformApi } from '../platform/api';
+import { ScheduleSettings } from './ScheduleSettings';
 
 const defaultShellHint = /Win/.test(navigator.platform)
   ? 'cmd.exe'
@@ -41,7 +43,17 @@ const defaultShellHint = /Win/.test(navigator.platform)
     : '/bin/bash';
 
 export type Section =
-  'general' | 'appearance' | 'terminal' | 'conflicts' | 'ai' | 'gitflow' | 'signing' | 'tools' | 'profiles' | 'about';
+  | 'general'
+  | 'appearance'
+  | 'terminal'
+  | 'conflicts'
+  | 'ai'
+  | 'gitflow'
+  | 'signing'
+  | 'tools'
+  | 'profiles'
+  | 'about'
+  | 'schedules';
 
 const input =
   'w-full max-w-[360px] rounded-md border border-surface bg-crust px-3 py-2 outline-none focus:border-accent';
@@ -790,6 +802,7 @@ export function SettingsPage({ onExit, initial = 'general' }: { onExit: () => vo
         >
           <div className="hidden px-3 pb-2 pt-1 text-xs font-medium text-sub sm:block">Preferences</div>
           {nav('general', 'General', Gear)}
+          {nav('schedules', 'Scheduled tasks', CalendarClock)}
           {nav('appearance', 'Appearance', Palette)}
           {nav('about', 'Application / About', Info)}
           {nav('profiles', 'Profiles', UserRound)}
@@ -814,6 +827,7 @@ export function SettingsPage({ onExit, initial = 'general' }: { onExit: () => vo
         <main className="min-w-0 flex-1 overflow-y-auto px-5 py-7 sm:px-10 lg:px-14">
           <div className="mx-auto w-full max-w-4xl">
             {section === 'about' && <ApplicationAbout />}
+            {section === 'schedules' && <ScheduleSettings />}
             {section === 'general' && (
               <>
                 <h1 className="text-2xl font-semibold">General</h1>

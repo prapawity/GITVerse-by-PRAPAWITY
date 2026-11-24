@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { execFileSync, spawnSync } = require('node:child_process');
-const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require('node:fs');
+const { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
@@ -45,6 +45,25 @@ if (!process.versions.electron) {
       path.join(userData, 'gitverse-state.json'),
       JSON.stringify({
         'gitverse.tabs': JSON.stringify({ repos: [repo], active: repo }),
+      }),
+    );
+    const previousMidnight = Math.floor(Date.now() / 86_400_000) * 86_400_000 - 86_400_000;
+    writeFileSync(
+      path.join(userData, 'schedules.json'),
+      JSON.stringify({
+        version: 1,
+        schedules: ['one', 'two'].map((id) => ({
+          id,
+          name: `Missed ${id}`,
+          action: 'refresh',
+          timing: { timeZone: 'UTC', hour: 0, minute: 0, weekday: null },
+          scope: { kind: 'open' },
+          enabled: true,
+          nextDue: previousMidnight,
+          missed: null,
+          running: null,
+          history: [],
+        })),
       }),
     );
     const env = { ...process.env, GITVERSE_SMOKE_DIR: dir };
@@ -109,6 +128,115 @@ if (!process.versions.electron) {
           );
         };
         await checkRestored();
+        const waitFor = async (script, description) => {
+          for (let attempt = 0; attempt < 100; attempt++) {
+            if (await win.webContents.executeJavaScript(script)) return;
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+          assert.fail(description);
+        };
+        await waitFor(
+          `window.gitApi.scheduler.list().then(state => state.schedules.length >= 2).catch(() => false)`,
+          'Scheduler did not initialize',
+        );
+        const schedulerState = await win.webContents.executeJavaScript('window.gitApi.scheduler.list()');
+        if (schedulerState.schedules.some((schedule) => schedule.missed)) {
+          const due = schedulerState.schedules.map((schedule) => schedule.nextDue);
+          await waitFor(
+            `!!document.querySelector('dialog[open] [id="missed-schedules-title"]')`,
+            'Missed tasks dialog did not open',
+          );
+          assert.equal(
+            await win.webContents.executeJavaScript(`document.querySelectorAll('dialog[open] input:checked').length`),
+            0,
+          );
+          await win.webContents.executeJavaScript(
+            `Array.from(document.querySelectorAll('dialog[open] button')).find(button => button.textContent.trim() === 'Later').click()`,
+          );
+          await win.webContents.executeJavaScript(`document.querySelector('button[aria-label="Preferences"]').click()`);
+          await waitFor(
+            `!!document.querySelector('button[aria-label="Scheduled tasks"]')`,
+            'Scheduler settings navigation missing',
+          );
+          await win.webContents.executeJavaScript(
+            `document.querySelector('button[aria-label="Scheduled tasks"]').click()`,
+          );
+          await waitFor(
+            `Array.from(document.querySelectorAll('button')).some(button => button.textContent.trim() === 'Review missed tasks')`,
+            'Missed tasks could not be reopened',
+          );
+          await win.webContents.executeJavaScript(
+            `Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Review missed tasks').click()`,
+          );
+          await waitFor(`!!document.querySelector('dialog[open] input')`, 'Missed tasks dialog did not reopen');
+          await win.webContents.executeJavaScript(
+            `document.querySelector('dialog[open] input').click(); Array.from(document.querySelectorAll('dialog[open] button')).find(button => button.textContent.trim() === 'Run selected').click()`,
+          );
+          await waitFor(
+            `window.gitApi.scheduler.list().then(state => state.schedules[0].history.length > 0)`,
+            'Selected missed task did not finish',
+          );
+          await waitFor(
+            `Array.from(document.querySelectorAll('dialog[open] button')).some(button => button.textContent.trim() === 'Skip all' && !button.disabled)`,
+            'Remaining missed task was not shown',
+          );
+          const afterRun = await win.webContents.executeJavaScript('window.gitApi.scheduler.list()');
+          assert.equal(afterRun.schedules[0].history[0].status, 'success');
+          assert.equal(afterRun.schedules[0].history[0].results[0].repo, repo);
+          assert.equal(afterRun.schedules[0].nextDue, due[0]);
+          assert.ok(afterRun.schedules[1].missed);
+          await win.webContents.executeJavaScript(
+            `Array.from(document.querySelectorAll('dialog[open] button')).find(button => button.textContent.trim() === 'Skip all').click()`,
+          );
+          await waitFor(
+            `window.gitApi.scheduler.list().then(state => state.schedules.every(item => !item.missed))`,
+            'Skipping remaining missed task failed',
+          );
+          await win.webContents.executeJavaScript(
+            `Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'New scheduled task').click()`,
+          );
+          await win.webContents.executeJavaScript(`(() => {
+            const label = Array.from(document.querySelectorAll('form label')).find(item => item.textContent.trim() === 'Name');
+            const input = label.querySelector('input');
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Smoke schedule');
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.form.requestSubmit();
+          })()`);
+          await waitFor(
+            `window.gitApi.scheduler.list().then(state => state.schedules.some(item => item.name === 'Smoke schedule'))`,
+            'Creating a scheduled task from settings failed',
+          );
+          await waitFor(
+            `Array.from(document.querySelectorAll('section')).some(section => section.textContent.includes('Smoke schedule'))`,
+            'Created task did not appear',
+          );
+          await win.webContents.executeJavaScript(`(() => {
+            const section = Array.from(document.querySelectorAll('section')).find(item => item.textContent.includes('Smoke schedule'));
+            Array.from(section.querySelectorAll('button')).find(button => button.textContent.trim() === 'Disable').click();
+          })()`);
+          await waitFor(
+            `window.gitApi.scheduler.list().then(state => state.schedules.some(item => item.name === 'Smoke schedule' && !item.enabled))`,
+            'Disabling the task failed',
+          );
+          await win.webContents.executeJavaScript(
+            `Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Back to workspace').click()`,
+          );
+        } else {
+          assert.equal(
+            schedulerState.schedules[0].history[0].status,
+            'success',
+            'Schedule history must survive restart',
+          );
+          assert.equal(
+            schedulerState.schedules[1].history[0].status,
+            'skipped',
+            'Skipped decision must survive restart',
+          );
+          assert.ok(
+            schedulerState.schedules.some((item) => item.name === 'Smoke schedule' && !item.enabled),
+            'Created task must survive restart',
+          );
+        }
         const panelLayout = await win.webContents.executeJavaScript(`(() => {
           const group = document.querySelector('[data-group]');
           const panels = group && Array.from(group.children).filter((element) => element.hasAttribute('data-panel'));
@@ -275,6 +403,46 @@ if (!process.versions.electron) {
           `JSON.parse(window.gitApi.stateStorage.getItem('gitverse.tabs'))`,
         );
         assert.deepEqual(tabs, { repos: [repo], active: repo });
+        if (process.platform !== 'win32') {
+          const queueRepo = path.join(dir, `queue-${process.pid}`);
+          const ready = path.join(dir, `queue-ready-${process.pid}`);
+          const release = path.join(dir, `queue-release-${process.pid}`);
+          mkdirSync(queueRepo);
+          const git = (...args) => execFileSync('git', ['-C', queueRepo, ...args]);
+          git('init', '-b', 'main');
+          git('config', 'user.name', 'Smoke Test');
+          git('config', 'user.email', 'smoke@example.com');
+          writeFileSync(path.join(queueRepo, 'commit.txt'), 'commit\n');
+          writeFileSync(path.join(queueRepo, 'stage.txt'), 'stage\n');
+          git('add', 'commit.txt');
+          writeFileSync(
+            path.join(queueRepo, '.git', 'hooks', 'pre-commit'),
+            `#!/bin/sh
+touch "$GITVERSE_SMOKE_DIR/queue-ready-${process.pid}"
+while [ ! -f "$GITVERSE_SMOKE_DIR/queue-release-${process.pid}" ]; do sleep 0.05; done
+`,
+            { mode: 0o755 },
+          );
+          const commit = win.webContents.executeJavaScript(
+            `window.gitApi.commit(${JSON.stringify(queueRepo)}, 'Queue smoke', '')`,
+          );
+          try {
+            for (let attempt = 0; attempt < 100 && !existsSync(ready); attempt++)
+              await new Promise((resolve) => setTimeout(resolve, 50));
+            assert.ok(existsSync(ready), 'Commit hook did not start');
+            let stageFinished = false;
+            const stage = win.webContents
+              .executeJavaScript(`window.gitApi.stage(${JSON.stringify(queueRepo)}, ['stage.txt'])`)
+              .then(() => (stageFinished = true));
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            assert.equal(stageFinished, false, 'Stage must wait for the in-flight commit');
+            writeFileSync(release, '');
+            await Promise.all([commit, stage]);
+            assert.equal(git('diff', '--cached', '--name-only').toString().trim(), 'stage.txt');
+          } finally {
+            writeFileSync(release, '');
+          }
+        }
         const unbridged = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true } });
         await unbridged.loadFile(path.join(__dirname, '../dist/index.html'));
         assert.equal(

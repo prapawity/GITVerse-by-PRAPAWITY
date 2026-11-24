@@ -46,6 +46,26 @@ const gitApi: Record<string, (...a: unknown[]) => Promise<any>> = {
   ipcRenderer.on('repo:scanProgress', handler);
   return () => ipcRenderer.removeListener('repo:scanProgress', handler);
 };
+(gitApi as any).scheduler = {
+  init: (repos: string[]) => ipcRenderer.invoke('scheduler:init', repos),
+  repos: (repos: string[]) => ipcRenderer.invoke('scheduler:repos', repos),
+  list: () => ipcRenderer.invoke('scheduler:list'),
+  retry: () => ipcRenderer.invoke('scheduler:retry'),
+  recover: () => ipcRenderer.invoke('scheduler:recover'),
+  add: (input: unknown) => ipcRenderer.invoke('scheduler:add', input),
+  update: (input: unknown) => ipcRenderer.invoke('scheduler:update', input),
+  enable: (id: string, enabled: boolean) => ipcRenderer.invoke('scheduler:enable', id, enabled),
+  remove: (id: string) => ipcRenderer.invoke('scheduler:remove', id),
+  run: (id: string) => ipcRenderer.invoke('scheduler:run', id),
+  retryFailed: (id: string, previousRunId: string) => ipcRenderer.invoke('scheduler:retryFailed', id, previousRunId),
+  runMissed: (ids: string[]) => ipcRenderer.invoke('scheduler:runMissed', ids),
+  skipMissed: (ids: string[]) => ipcRenderer.invoke('scheduler:skipMissed', ids),
+  onChanged: (cb: () => void) => {
+    const handler = () => cb();
+    ipcRenderer.on('scheduler:changed', handler);
+    return () => ipcRenderer.removeListener('scheduler:changed', handler);
+  },
+};
 for (const n of GIT_METHODS) gitApi[n] = (...a) => ipcRenderer.invoke(`git:${n}`, ...a);
 (gitApi as any).setActiveIdentity = (identity: { name: string; email: string } | null) =>
   ipcRenderer.invoke('profile:setIdentity', identity);

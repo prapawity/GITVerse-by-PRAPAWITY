@@ -15,7 +15,9 @@ mod op_state;
 mod push;
 mod reflog;
 mod refs;
+mod repository_queue;
 mod runner;
+mod scheduled;
 mod show;
 mod stash;
 mod status;
@@ -40,7 +42,9 @@ pub use op_state::{op_state, OpKind, OpState};
 pub use push::{push_branch, push_info, AuthKind, PushAuth, PushInfo, PushOptions};
 pub use reflog::{reflog, ReflogEntry};
 pub use refs::{refs, stash_entries, RefList, StashRef};
+pub use repository_queue::RepositoryQueue;
 pub use runner::{GitRunner, Identity, RunOpts};
+pub use scheduled::{queued_scheduled_git, scheduled_git, ScheduledGitAction, ScheduledGitResult};
 pub use show::{
     commit_detail, commit_file_diff, commit_people, working_file_diff, Area, ChangedFile,
     CommitDetail, CommitPeople, Person,

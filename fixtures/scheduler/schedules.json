@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "schedules": [
+    {
+      "id": "morning",
+      "name": "Fetch repositories",
+      "action": "fetch",
+      "timing": { "timeZone": "America/New_York", "hour": 1, "minute": 30, "weekday": null },
+      "scope": { "kind": "selected", "repos": ["/example/repo"] },
+      "enabled": true,
+      "nextDue": 1793511000000,
+      "missed": { "count": 2, "latest": 1793424600000 },
+      "running": null,
+      "history": [
+        {
+          "id": "previous",
+          "startedAt": 1793338200000,
+          "trigger": "manual",
+          "status": "success",
+          "results": [{ "repo": "/example/repo", "status": "success" }]
+        }
+      ]
+    }
+  ]
+}

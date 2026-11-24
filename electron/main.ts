@@ -16,6 +16,9 @@ import { checkAppUpdate, downloadMacUpdate, isReleaseDownloadUrl, listReleases, 
 import type { AppUpdateCheck } from '../src/shared/updates';
 import { scanRepositories } from './repositoryScan';
 import { fixPath } from './shellPath';
+import { RepositoryQueue } from './git/repositoryQueue';
+import { registerScheduler } from './schedulerRuntime';
+import gitReadMethods from '../src/shared/gitReadMethods.json';
 
 // before any Git command: hooks (git-lfs…) need the same PATH as the user's terminal
 fixPath();
@@ -138,8 +141,13 @@ const handlers = {
   writeWorkFile: git.writeWorkFile,
 } as const;
 
+const repositoryQueue = new RepositoryQueue();
+const gitReads = new Set(gitReadMethods);
 for (const [name, fn] of Object.entries(handlers)) {
-  ipcMain.handle(`git:${name}`, (_e, ...args) => (fn as (...a: any[]) => unknown)(...args));
+  ipcMain.handle(`git:${name}`, (_e, ...args) => {
+    const invoke = () => Promise.resolve((fn as (...a: any[]) => unknown)(...args));
+    return gitReads.has(name) ? invoke() : repositoryQueue.run(args[0], invoke);
+  });
 }
 // open a conflicted file in the user's editor; refuse paths that escape the repository
 ipcMain.handle('repo:openFile', async (_e, cwd: string, rel: string) => {
@@ -257,18 +265,20 @@ ipcMain.handle(
     credentials?: { username: string; password: string },
     options?: { forceWithLease?: boolean; expectedRemoteHash?: string },
   ) =>
-    git.pushBranch(
-      repo,
-      remote,
-      branch,
-      target,
-      credentials
-        ? { kind: 'https', username: credentials.username, token: credentials.password }
-        : profile && {
-            ...profile,
-            token: profile.kind === 'https' ? (readSecret(pushTokenKey(repo, profile.id)) ?? undefined) : undefined,
-          },
-      options,
+    repositoryQueue.run(repo, () =>
+      git.pushBranch(
+        repo,
+        remote,
+        branch,
+        target,
+        credentials
+          ? { kind: 'https', username: credentials.username, token: credentials.password }
+          : profile && {
+              ...profile,
+              token: profile.kind === 'https' ? (readSecret(pushTokenKey(repo, profile.id)) ?? undefined) : undefined,
+            },
+        options,
+      ),
     ),
 );
 
@@ -509,6 +519,7 @@ app.whenReady().then(async () => {
     backgroundColor: '#1e1e2e',
     webPreferences: { preload: path.join(__dirname, '../preload/preload.js'), contextIsolation: true, sandbox: true },
   });
+  registerScheduler(win, repositoryQueue);
   lockDownNavigation(win);
   if (process.env.VITE_DEV_SERVER_URL) win.loadURL(process.env.VITE_DEV_SERVER_URL);
   else win.loadFile(path.join(__dirname, '../../dist/index.html'));
