@@ -1,9 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use gitverse_core::git::{
-    scheduled_git, GitRunner, RunOpts, ScheduledGitAction, ScheduledGitResult,
-};
+use gitverse_core::git::{scheduled_git, GitRunner, ScheduledGitAction, ScheduledGitResult};
 
 fn git(cwd: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
@@ -157,6 +155,7 @@ async fn scheduled_errors_do_not_expose_git_output() {
 #[cfg(unix)]
 #[tokio::test]
 async fn timeout_terminates_git_descendants() {
+    use gitverse_core::git::RunOpts;
     use std::os::unix::fs::PermissionsExt;
     let temp = tempfile::tempdir().unwrap();
     let fake_git = temp.path().join("git");
