@@ -13,6 +13,10 @@ pub enum AppError {
     Cancelled,
     #[error("The Git command timed out.")]
     Timeout,
+    #[error("Another Git operation is in progress.")]
+    RepositoryBusy,
+    #[error("Could not stop the scheduled Git process tree. Close the app only after ensuring its Git processes have stopped.")]
+    ScheduledCleanup,
     #[error("{0}")]
     Invalid(String),
     #[error("{0}")]
@@ -30,6 +34,8 @@ impl AppError {
             AppError::Spawn(_) => "spawn",
             AppError::Cancelled => "cancelled",
             AppError::Timeout => "timeout",
+            AppError::RepositoryBusy => "repositoryBusy",
+            AppError::ScheduledCleanup => "scheduledCleanup",
             AppError::Invalid(_) => "invalid",
             AppError::NotPorted(_) => "notPorted",
             AppError::Io(_) => "io",

@@ -8,6 +8,7 @@
 import type { GitMethodName } from '../shared/gitMethods';
 import type { ScanProgress } from '../shared/repositoryScan';
 import type { ConnectResult, HostKind, HostRequest, HostResponse } from '../shared/pullRequests';
+import type { NewSchedule, Schedule } from '../shared/scheduleState';
 
 type Unsubscribe = () => void;
 // Git payloads are typed at the call site for now; tighten per method as the contract is generated.
@@ -53,6 +54,22 @@ export interface PlatformApi extends Record<GitMethodName, AnyAsync> {
   /** Native file drag-and-drop (Tauri): the web view's own drop events carry no file paths there. */
   onFileDrop?(cb: (event: { type: 'enter' | 'leave' | 'drop'; paths: string[] }) => void): Unsubscribe;
   setActiveIdentity(identity: { name: string; email: string } | null): Promise<unknown>;
+  scheduler: {
+    init(repos: string[]): Promise<{ schedules: Schedule[]; error: string | null }>;
+    repos(repos: string[]): Promise<void>;
+    list(): Promise<{ schedules: Schedule[]; error: string | null }>;
+    retry(): Promise<{ schedules: Schedule[]; error: string | null }>;
+    recover(): Promise<{ schedules: Schedule[]; error: string | null }>;
+    add(input: NewSchedule): Promise<Schedule>;
+    update(input: NewSchedule): Promise<void>;
+    enable(id: string, enabled: boolean): Promise<void>;
+    remove(id: string): Promise<void>;
+    run(id: string): Promise<void>;
+    retryFailed(id: string, previousRunId: string): Promise<void>;
+    runMissed(ids: string[]): Promise<void>;
+    skipMissed(ids: string[]): Promise<void>;
+    onChanged(cb: () => void): Unsubscribe;
+  };
   updates: Record<
     'environment' | 'startup' | 'check' | 'list' | 'openReleaseList' | 'openDownloads' | 'download' | 'install',
     AnyAsync

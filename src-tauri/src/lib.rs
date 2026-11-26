@@ -3,17 +3,20 @@
 mod ai_commands;
 mod app_commands;
 mod commands;
+mod scheduler_commands;
 mod update_commands;
 
 use std::path::PathBuf;
 
-use gitverse_core::git::{GitRunner, Identity, IndexHistory};
+use gitverse_core::git::{GitRunner, Identity, IndexHistory, RepositoryQueue};
 use tauri::Manager;
 
 pub struct AppState {
     pub git: GitRunner,
     /// Undo/redo of stage actions, per repository, for this app session.
     pub index_history: IndexHistory,
+    pub repository_queue: RepositoryQueue,
+    pub scheduler: scheduler_commands::SchedulerRuntime,
     /// Open integrated terminals; all are killed when the app exits.
     pub terminals: gitverse_core::terminal::Terminals,
     /// API keys and tokens, in the OS credential store.
@@ -148,6 +151,8 @@ pub fn run() {
             app.manage(AppState {
                 git,
                 index_history: IndexHistory::default(),
+                repository_queue: RepositoryQueue::default(),
+                scheduler: scheduler_commands::SchedulerRuntime::default(),
                 terminals: Default::default(),
                 secrets,
                 ai_requests: Default::default(),
@@ -162,6 +167,19 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::state_load,
             commands::state_save,
+            scheduler_commands::scheduler_init,
+            scheduler_commands::scheduler_repos,
+            scheduler_commands::scheduler_list,
+            scheduler_commands::scheduler_retry,
+            scheduler_commands::scheduler_recover,
+            scheduler_commands::scheduler_add,
+            scheduler_commands::scheduler_update,
+            scheduler_commands::scheduler_enable,
+            scheduler_commands::scheduler_remove,
+            scheduler_commands::scheduler_run,
+            scheduler_commands::scheduler_retry_failed,
+            scheduler_commands::scheduler_run_missed,
+            scheduler_commands::scheduler_skip_missed,
             commands::repo_open,
             commands::set_identity,
             commands::git_call,
@@ -220,6 +238,7 @@ pub fn run() {
         .run(|handle, event| {
             // No orphaned shells: end every terminal when the app exits.
             if let tauri::RunEvent::Exit = event {
+                scheduler_commands::release_on_exit(&handle.state::<AppState>());
                 handle.state::<AppState>().terminals.kill_all();
                 handle.state::<AppState>().copilot.shutdown();
             }

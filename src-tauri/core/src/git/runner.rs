@@ -3,7 +3,7 @@ use std::process::Stdio;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
@@ -27,6 +27,8 @@ pub struct RunOpts {
     pub ok_codes: Vec<i32>,
     /// Skip the `-c user.name/email` identity (read-only commands that never write commits).
     pub no_identity: bool,
+    /// Isolate the child so scheduled commands can terminate their descendants on timeout.
+    pub process_group: bool,
 }
 
 impl RunOpts {
@@ -115,6 +117,19 @@ impl GitRunner {
             // CREATE_NO_WINDOW: no console window flashing for every git call
             cmd.creation_flags(0x0800_0000);
         }
+        #[cfg(unix)]
+        if opts.process_group {
+            use std::os::unix::process::CommandExt;
+            unsafe {
+                cmd.as_std_mut().pre_exec(|| {
+                    if libc::setsid() == -1 {
+                        Err(std::io::Error::last_os_error())
+                    } else {
+                        Ok(())
+                    }
+                });
+            }
+        }
 
         let mut child = cmd.spawn().map_err(|e| AppError::Spawn(e.to_string()))?;
         if let Some(input) = opts.stdin {
@@ -123,9 +138,12 @@ impl GitRunner {
             }
         }
 
-        let wait = child.wait_with_output();
-        let cancel = opts.cancel.unwrap_or_default();
-        let output = tokio::select! {
+        let output = if opts.process_group {
+            grouped_output(child, opts.timeout, opts.cancel.unwrap_or_default()).await?
+        } else {
+            let wait = child.wait_with_output();
+            let cancel = opts.cancel.unwrap_or_default();
+            tokio::select! {
             out = async {
                 match opts.timeout {
                     Some(t) => tokio::time::timeout(t, wait).await.map_err(|_| AppError::Timeout)?,
@@ -134,6 +152,7 @@ impl GitRunner {
                 .map_err(AppError::from)
             } => out?,
             _ = cancel.cancelled() => return Err(AppError::Cancelled),
+            }
         };
 
         let ok = output.status.success()
@@ -143,6 +162,89 @@ impl GitRunner {
                 .is_some_and(|c| opts.ok_codes.contains(&c));
         if ok {
             return Ok(output.stdout);
+        }
+
+        async fn grouped_output(
+            mut child: tokio::process::Child,
+            timeout: Option<Duration>,
+            cancel: CancellationToken,
+        ) -> Result<std::process::Output> {
+            let pid = child
+                .id()
+                .ok_or_else(|| AppError::Spawn("Missing Git process ID.".into()))?;
+            let mut stdout = child
+                .stdout
+                .take()
+                .ok_or_else(|| AppError::Spawn("Missing Git stdout.".into()))?;
+            let mut stderr = child
+                .stderr
+                .take()
+                .ok_or_else(|| AppError::Spawn("Missing Git stderr.".into()))?;
+            let mut out = Vec::new();
+            let mut err = Vec::new();
+            let finished = async {
+                let (status, out_result, err_result) = tokio::join!(
+                    child.wait(),
+                    stdout.read_to_end(&mut out),
+                    stderr.read_to_end(&mut err)
+                );
+                Ok::<_, std::io::Error>(std::process::Output {
+                    status: status?,
+                    stdout: {
+                        out_result?;
+                        out
+                    },
+                    stderr: {
+                        err_result?;
+                        err
+                    },
+                })
+            };
+            let result = tokio::select! {
+                output = async {
+                    match timeout {
+                        Some(duration) => tokio::time::timeout(duration, finished).await.map_err(|_| AppError::Timeout)?,
+                        None => finished.await,
+                    }.map_err(AppError::from)
+                } => output,
+                _ = cancel.cancelled() => Err(AppError::Cancelled),
+            };
+            if matches!(result, Err(AppError::Timeout | AppError::Cancelled)) {
+                terminate_group(pid)
+                    .await
+                    .map_err(|_| AppError::ScheduledCleanup)?;
+                child.wait().await.map_err(|_| AppError::ScheduledCleanup)?;
+            }
+            result
+        }
+
+        async fn terminate_group(pid: u32) -> Result<()> {
+            #[cfg(unix)]
+            {
+                let result = unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+                if result == -1 {
+                    let error = std::io::Error::last_os_error();
+                    if error.raw_os_error() != Some(libc::ESRCH) {
+                        return Err(error.into());
+                    }
+                }
+            }
+            #[cfg(windows)]
+            {
+                let status = Command::new("taskkill")
+                    .args(["/pid", &pid.to_string(), "/t", "/f"])
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .await?;
+                if !status.success() {
+                    return Err(AppError::Invalid(
+                        "Could not terminate the scheduled Git process tree.".into(),
+                    ));
+                }
+            }
+            Ok(())
         }
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         // git reports some failures (e.g. rebase --continue) on stdout: same fallback as git.ts

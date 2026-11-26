@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use gitverse_core::git::{self, Identity};
 use gitverse_core::state::{self, State};
@@ -9,6 +10,17 @@ use tauri_plugin_dialog::DialogExt;
 use crate::AppState;
 
 type CmdResult<T> = Result<T, AppError>;
+
+fn is_read_method(method: &str) -> bool {
+    static READS: OnceLock<Vec<String>> = OnceLock::new();
+    READS
+        .get_or_init(|| {
+            serde_json::from_str(include_str!("../../src/shared/gitReadMethods.json"))
+                .expect("Git read method list must be valid JSON")
+        })
+        .iter()
+        .any(|name| name == method)
+}
 
 #[tauri::command]
 pub fn state_load(app: tauri::State<'_, AppState>) -> State {
@@ -215,6 +227,11 @@ pub async fn git_call(
     let git = app.git.clone();
     let history = &app.index_history;
     let a = Args(args);
+    let _guard = if PORTED.contains(&method.as_str()) && !is_read_method(&method) {
+        Some(app.repository_queue.acquire(&git, &a.repo()?, None).await?)
+    } else {
+        None
+    };
     match method.as_str() {
         "status" => json(git::status(&git, &a.repo()?).await?),
         "log" => json(
@@ -442,6 +459,7 @@ pub async fn git_call(
                 a.parse(2)?,
                 a.opt_str(3).unwrap_or(""),
                 a.i64(4)?,
+                a.parse_or_default::<Option<Vec<i64>>>(5)?.as_deref(),
             )
             .await?,
         ),
@@ -452,6 +470,7 @@ pub async fn git_call(
                 a.str(1)?,
                 a.opt_str(2).unwrap_or(""),
                 a.i64(3)?,
+                a.parse_or_default::<Option<Vec<i64>>>(4)?.as_deref(),
             )
             .await?,
         ),
@@ -609,6 +628,10 @@ pub async fn push_branch(
     credentials: Option<PushCredentials>,
     options: Option<git::PushOptions>,
 ) -> CmdResult<String> {
+    let _guard = app
+        .repository_queue
+        .acquire(&app.git, Path::new(&repo), None)
+        .await?;
     let auth = match (credentials, profile) {
         (Some(c), _) => Some(git::PushAuth {
             kind: git::AuthKind::Https,

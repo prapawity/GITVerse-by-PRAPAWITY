@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { GIT_METHODS } from './gitMethods';
+import gitReadMethods from './gitReadMethods.json';
 
 test('GIT_METHODS matches the git:* handlers registered in electron/main.ts', () => {
   const main = readFileSync(path.resolve(__dirname, '../../electron/main.ts'), 'utf8');
@@ -18,4 +19,12 @@ test('GIT_METHODS matches the git:* handlers registered in electron/main.ts', ()
 
 test('GIT_METHODS has no duplicates', () => {
   assert.equal(new Set(GIT_METHODS).size, GIT_METHODS.length);
+});
+
+test('read-only Git method list contains only registered methods without duplicates', () => {
+  assert.equal(new Set(gitReadMethods).size, gitReadMethods.length);
+  assert.deepEqual(
+    gitReadMethods.filter((name) => !GIT_METHODS.some((method) => method === name)),
+    [],
+  );
 });
