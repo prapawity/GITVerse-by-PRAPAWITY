@@ -1,6 +1,6 @@
 [package]
 name = "gitverse-by-prapawity"
-version = "1.0.5"
+version = "1.0.6"
 description = "A desktop Git client with commit graphs, conflict tools, and optional AI assistance."
 authors = ["PRAPAWITY"]
 license = "MIT"
